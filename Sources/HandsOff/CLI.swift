@@ -29,6 +29,7 @@ enum CLI {
       handsoff status          What the menu bar shows.
       handsoff hold [minutes]  Make agents wait (default 15 minutes), like the menu's "Hold on, I'm typing".
       handsoff resume          End the hold.
+      handsoff quit-app        Quit the menu bar app (turns the virtual display off).
     """
 
     static func run(_ args: [String]) -> Int32 {
@@ -40,6 +41,7 @@ enum CLI {
         case "status": return status()
         case "hold": return hold(rest)
         case "resume": StateStore.standard().endHold(); print("Agents can take the keyboard again."); return 0
+        case "quit-app": return quitApp()
         case "help", "-h", "--help": print(usage); return 0
         default: return fail("unknown command \"\(args[0])\"\n\n\(usage)", code: 2)
         }
@@ -178,6 +180,13 @@ enum CLI {
             return fail("screencapture failed; the terminal running this needs Screen Recording permission (System Settings → Privacy & Security)")
         }
         print(path)
+        return 0
+    }
+
+    static func quitApp() -> Int32 {
+        let apps = NSRunningApplication.runningApplications(withBundleIdentifier: AppBundle.identifier)
+        apps.forEach { $0.terminate() }
+        for _ in 0..<50 where apps.contains(where: { !$0.isTerminated }) { Thread.sleep(forTimeInterval: 0.1) }
         return 0
     }
 
