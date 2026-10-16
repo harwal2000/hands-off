@@ -67,8 +67,11 @@ import HandsOffCore
         let bounds = CGDisplayBounds(id)
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
         var names: [String] = []
+        // Normal and floating windows only: the menu bar and wallpaper macOS draws on every display aren't apps.
+        let system: Set<String> = ["Window Server", "Dock", "Control Center", "SystemUIServer", "Notification Center", "Wallpaper"]
         for w in windows {
-            guard let owner = w[kCGWindowOwnerName as String] as? String,
+            guard let owner = w[kCGWindowOwnerName as String] as? String, !system.contains(owner),
+                  let layer = w[kCGWindowLayer as String] as? Int, (0..<Int(CGWindowLevelForKey(.mainMenuWindow))).contains(layer),
                   let dict = w[kCGWindowBounds as String] as? NSDictionary,
                   let frame = CGRect(dictionaryRepresentation: dict),
                   frame.intersects(bounds), !names.contains(owner) else { continue }

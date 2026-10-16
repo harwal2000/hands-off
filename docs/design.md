@@ -48,9 +48,9 @@ They share state through files in `~/Library/Application Support/Hands Off/`
 | File | Written by | Meaning |
 |---|---|---|
 | `display.json` | app | the virtual display's ID and frame (CoreGraphics and AppKit coordinates) |
-| `keyboard.lock/holder.json` | CLI | the agent holding the keyboard: reason, label, pid, start |
+| `keyboard.lock` | CLI | the agent holding the keyboard: reason, label, pid, start |
 | `waiting/<pid>.json` | CLI | agents queued for the keyboard |
-| `paused` | app | you said "hold on"; holds the time it ends |
+| `hold.json` | app or CLI | you said "hold on"; holds the time it ends |
 
 The app polls the folder twice a second; the CLI needs no app to work (but launches it if installed, so
 the menu bar shows what's happening).
@@ -68,8 +68,8 @@ point, so the pointer doesn't drift onto it). Menu: turn it off and on.
 2. Waits until you're not holding agents, nobody else holds the keyboard, and you haven't pressed a key
    or clicked for `S` seconds (default 5). Mouse *movement* doesn't count; it doesn't move focus. Only
    real hardware input counts (`CGEventSource` HID state), so the agent's own synthetic events don't.
-3. Takes the lock (an atomic `mkdir`). Menu bar: red, "Hands off" with a countdown (`--seconds`) or elapsed
-   time.
+3. Takes the lock (a hard link to a fully written file, so it appears atomically with its contents). Menu bar: red,
+   "Hands off" with a countdown (`--seconds`; `+m:ss` once it runs over) or the elapsed time.
 4. Runs the command, then releases. A holder whose process died is ignored.
 5. Exit code is the command's, except **75** when you pressed a key or clicked during the hold ("results may
    be wrong, run it again") or when waiting gave up after `W` seconds (default 30 min).
@@ -81,7 +81,7 @@ Multi-step work goes in one wrapped shell: `handsoff focus -- sh -c '…'`.
 - `handsoff display` — the display's frame as JSON (launches the app and waits for it if needed).
 - `handsoff screenshot <file.png>` — captures only the virtual display, never your screens.
 - `handsoff status` — what the menu bar shows, as text.
-- `handsoff hold [minutes]` / `handsoff release-hold` — same as the menu's buttons.
+- `handsoff hold [minutes]` / `handsoff resume` — same as the menu's buttons.
 
 ## Builder's calls (not decided with the user)
 

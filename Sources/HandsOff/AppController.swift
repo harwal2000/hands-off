@@ -10,6 +10,7 @@ import ServiceManagement
     private var statusItem: NSStatusItem!
     private var timer: Timer?
     private var lastRendered: (String, String)?
+    private var lastItemFrame = ""
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let id = Bundle.main.bundleIdentifier,
@@ -25,14 +26,27 @@ import ServiceManagement
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.display.publish() }
         }
+        // For README screenshots: `handsoff _open-menu <seconds>` opens the menu and closes it again.
+        DistributedNotificationCenter.default().addObserver(forName: .init("com.harwal2000.handsoff.openMenu"), object: nil, queue: .main) { [weak self] note in
+            let seconds = Double(note.object as? String ?? "") ?? 3
+            MainActor.assumeIsolated { self?.openMenuBriefly(seconds: seconds) }
+        }
         render()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.render() }
         }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         display.turnOff()
+    }
+
+    private func openMenuBriefly(seconds: Double) {
+        let close = Timer(timeInterval: seconds, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.statusItem.menu?.cancelTracking() }
+        }
+        RunLoop.main.add(close, forMode: .eventTracking)
+        statusItem.button?.performClick(nil)
     }
 
     // MARK: Menu bar item
@@ -48,6 +62,7 @@ import ServiceManagement
         case .holding: ("hand.raised.fill", .systemRed)
         }
         let key = (symbol + (color?.description ?? ""), title)
+        recordItemFrame()
         if let lastRendered, lastRendered == key { return }
         lastRendered = key
 
@@ -70,6 +85,17 @@ import ServiceManagement
         button.toolTip = tooltip(status)
     }
 
+    /// Where the menu bar item is, in CoreGraphics screen coordinates, for scripts that record it (README GIFs).
+    private func recordItemFrame() {
+        guard let window = statusItem.button?.window else { return }
+        let mainHeight = NSScreen.screens.first?.frame.height ?? 0
+        let f = window.frame
+        let text = "\(Int(f.minX)) \(Int(mainHeight - f.maxY)) \(Int(f.width)) \(Int(f.height))\n"
+        guard text != lastItemFrame, f.height > 0 else { return }
+        lastItemFrame = text
+        try? text.write(to: store.directory.appending(path: "menubar-item.txt"), atomically: true, encoding: .utf8)
+    }
+
     private func tooltip(_ status: Status) -> String {
         switch status {
         case .idle: "Hands Off: no agent needs the keyboard"
@@ -86,11 +112,19 @@ import ServiceManagement
         let now = Date()
         let status = Status.read(from: store, now: now)
 
+        // Status lines can't be clicked, but they're the point of the menu. A disabled item is always drawn greyed
+        // out, so they're plain labels instead (which also don't highlight under the pointer).
         func line(_ text: String, bold: Bool = false, indent: Int = 0) {
+            let font = bold ? NSFont.boldSystemFont(ofSize: NSFont.systemFontSize) : NSFont.menuFont(ofSize: 0)
+            let color: NSColor = bold || indent == 0 ? .labelColor : .secondaryLabelColor
+            let label = NSTextField(labelWithAttributedString: NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color]))
+            let size = label.fittingSize
+            let left = 14 + CGFloat(indent) * 12
+            let view = NSView(frame: NSRect(x: 0, y: 0, width: left + size.width + 16, height: 22))
+            label.frame = NSRect(x: left, y: (22 - size.height) / 2, width: size.width, height: size.height)
+            view.addSubview(label)
             let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            item.indentationLevel = indent
-            if bold { item.attributedTitle = NSAttributedString(string: text, attributes: [.font: NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)]) }
+            item.view = view
             menu.addItem(item)
         }
         func waiting(_ ws: [Waiter]) {

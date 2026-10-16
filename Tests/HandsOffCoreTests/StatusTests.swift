@@ -24,8 +24,11 @@ import Testing
         #expect(try store.tryAcquire(holder(10, started: now, seconds: 40)))
         let status = Status.read(from: store, now: now)
         #expect(status.menuBarTitle(now: now.addingTimeInterval(8)) == "Hands off 0:32")
-        // Past its estimate it counts up instead of showing a negative time.
-        #expect(status.menuBarTitle(now: now.addingTimeInterval(65)) == "Hands off 1:05")
+        // Rounds up, so it never shows 0:00 while time is left.
+        #expect(status.menuBarTitle(now: now.addingTimeInterval(39.5)) == "Hands off 0:01")
+        // Past its estimate it shows the overrun, instead of jumping from 0:00 to the elapsed time.
+        #expect(status.menuBarTitle(now: now.addingTimeInterval(40.2)) == "Hands off +0:00")
+        #expect(status.menuBarTitle(now: now.addingTimeInterval(65)) == "Hands off +0:25")
     }
 
     @Test func holdingCountsUpWithoutAnEstimate() throws {

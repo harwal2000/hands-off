@@ -42,6 +42,9 @@ enum CLI {
         case "hold": return hold(rest)
         case "resume": StateStore.standard().endHold(); print("Agents can take the keyboard again."); return 0
         case "quit-app": return quitApp()
+        case "_open-menu":   // undocumented: for README screenshots (wrap it in handsoff focus: a menu takes the keyboard)
+            DistributedNotificationCenter.default().postNotificationName(.init("com.harwal2000.handsoff.openMenu"), object: args.dropFirst().first, userInfo: nil, deliverImmediately: true)
+            return 0
         case "help", "-h", "--help": print(usage); return 0
         default: return fail("unknown command \"\(args[0])\"\n\n\(usage)", code: 2)
         }

@@ -27,13 +27,14 @@ public enum Status: Equatable, Sendable {
         case .onHold(let until, _): return "Agents on hold \(Int((until.timeIntervalSince(now) / 60).rounded(.up)))m"
         case .holding(let h, _, _):
             let elapsed = now.timeIntervalSince(h.started)
-            if let seconds = h.seconds, elapsed < seconds { return "Hands off \(clock(seconds - elapsed))" }
-            return "Hands off \(clock(elapsed))"
+            guard let seconds = h.seconds else { return "Hands off \(clock(elapsed))" }
+            if elapsed < seconds { return "Hands off \(clock((seconds - elapsed).rounded(.up)))" }
+            return "Hands off +\(clock(elapsed - seconds))"
         }
     }
 }
 
-/// `m:ss`, rounding a countdown's fraction up so it never shows 0:00 while time is left.
+/// `m:ss`, dropping the fraction of a second.
 func clock(_ seconds: Double) -> String {
     let s = max(0, Int(seconds.rounded(.down)))
     return "\(s / 60):" + String(format: "%02d", s % 60)
