@@ -205,7 +205,9 @@ enum CLI {
             print("Agents are on hold until \(until.formatted(date: .omitted, time: .shortened)).")
             ws.forEach { print("  waiting: \($0.label): \($0.reason)") }
         case .holding(let h, let ws, _):
-            print("Hands off: \(h.label) has the keyboard (\(h.reason)), \(Int(now.timeIntervalSince(h.started))) s so far.")
+            let elapsed = Int(now.timeIntervalSince(h.started))
+            let expected = h.seconds.map { ", expects about \(Int($0)) s" } ?? ""
+            print("Hands off: \(h.label) has the keyboard (\(h.reason)), \(elapsed) s so far\(expected). Menu bar: \(Status.read(from: store, now: now).menuBarTitle(now: now))")
             ws.forEach { print("  waiting: \($0.label): \($0.reason)") }
         }
         if let d = store.display() {
