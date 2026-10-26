@@ -27,7 +27,7 @@ agents take turns with you instead:
 |---|---|
 | Windows | Agents put their test windows on a virtual display off the corner of your screen. You never see them. |
 | Screenshots | `handsoff screenshot` captures that display only, never your screens. |
-| Keyboard | An agent that needs focus waits until you stop typing, and the menu bar turns red: **Hands off 0:32**. |
+| Keyboard | An agent that needs focus waits until you stop typing, then asks you. It starts after 10 s unless you say **Not now**, and the menu bar turns red: **Hands off 0:32**. |
 | You touched it anyway | The agent is told its result can't be trusted, and runs the step again. |
 | You need a minute | **Hold on, I'm typing** in the menu makes every agent wait. |
 
@@ -57,9 +57,20 @@ I now leave agents testing while I work, instead of sitting on my hands until th
 | Menu bar | Meaning |
 |---|---|
 | Plain hand icon | Nothing needs the keyboard. Carry on. |
-| **Agent needs keyboard** (orange) | An agent is waiting. It takes over once you stop typing and clicking for 5 seconds. |
+| **Agent needs keyboard** (orange) | An agent is waiting. It asks once you stop typing and clicking for 5 seconds. |
+| **Agent starts in 0:08** (orange) | An agent is asking (see below). It starts when the countdown ends. |
 | **Hands off 0:32** (red) | An agent has the keyboard. Let go until the countdown ends (`+0:05` means it's running over). |
 | **Agents on hold 15m** | You chose *Hold on, I'm typing*. Agents wait until it runs out or you let them continue. |
+
+Before each hold, a prompt under the icon says who's asking, why and for how long. It doesn't take the keyboard, so
+you can keep typing, but each key press or click restarts its 10-second countdown: an agent never starts within 10
+seconds of your last key. **Start** lets it go now. **Not now** makes agents wait 2 minutes, then the next one asks
+again. If you don't answer, it starts when the countdown ends. With several agents in line, you're asked about one at
+a time, and the prompt says how many more are waiting.
+
+<img src="docs/prompt-light.png" width="380" alt="The prompt: my-app · editor-fix wants the keyboard for a typing test in the editor, for about 40 s. Starts in 8 s, with Not now and Start">
+
+Don't want to be asked? Turn off **Ask before each hold** in the menu, or run `handsoff config confirm off`.
 
 Click the icon to see who has the keyboard, why, and who is waiting:
 
@@ -102,8 +113,11 @@ The user works on this Mac while you test. When you run, drive or screenshot a m
   (`handsoff screenshot <file.png>`). Never capture the whole screen.
 - **Wrap every step that takes keyboard focus, activates an app, opens a menu or posts key or mouse events** in
   `handsoff focus --reason "<what, in plain words>" --seconds <estimate> -- <command>`
-  (several steps: `-- sh -c '…'`). It waits until the user stops typing, shows "Hands off" in the menu bar, then
-  runs the command. Build and prepare first, so you hold the keyboard only for the part that needs it.
+  (several steps: `-- sh -c '…'`). It waits until the user stops typing, asks them (it starts by itself after 10 s),
+  shows "Hands off" in the menu bar, then runs the command. Build and prepare first, so you hold the keyboard only
+  for the part that needs it. The reason and estimate are what the user sees when asked: make them plain and honest.
+- **If the user says Not now, the command keeps waiting** (2 minutes, then it asks again). Don't cancel it, and give it
+  a timeout of several minutes.
 - **Exit code 75 means the user pressed a key or clicked during the hold** (or waiting gave up): the result can't be
   trusted. Run the step again. Never work around it with `--idle 0` or `--allow-input`.
 - If `handsoff status` says the virtual display is off, ask the user before testing on their screens.
@@ -148,7 +162,8 @@ handsoff focus [options] -- <command> [args…]   Take the keyboard for one comm
     --allow-input     for tools that post hardware-level events themselves (cliclick and the like)
 handsoff display [--appkit | --cg]              The virtual display's frame
 handsoff screenshot <file.png>                  Capture the virtual display only
-handsoff status                                 What the menu bar shows, as text
+handsoff status                                 What the menu bar shows, as text (including a prompt)
+handsoff config confirm on|off                  Ask before each hold, or don't (on by default)
 handsoff hold [minutes] / handsoff resume       Make agents wait / let them continue
 handsoff quit-app                               Quit the menu bar app
 ```
@@ -158,6 +173,7 @@ An agent wrapping a step looks like this:
 ```console
 $ handsoff focus --reason "Typing test in the editor" --seconds 40 -- ./ui-test.sh
 handsoff: waiting: the user is typing or clicking (takes over after 5 s without)
+handsoff: asking the user first: starts in 10 s unless they say Not now (keys and clicks restart the countdown)
 handsoff: you have the keyboard: Typing test in the editor
 ...test output...
 $ echo $?
@@ -179,6 +195,9 @@ reuse the hold instead of waiting for themselves.
 - **"Touched the keyboard"** means a key press or mouse click from real hardware, read from the system's input state.
   It needs no permission. Moving the mouse doesn't count, because it doesn't move focus. Events that apps post
   themselves don't count either.
+- **The prompt** is a panel that can't become the key window and doesn't activate the app, so it never takes the
+  keyboard. Only one agent asks at a time (a lock file, like the keyboard's). Not now is a 2-minute "Hold on". The
+  command doesn't ask when the menu bar app isn't running, since nobody could answer.
 - **The keyboard lock** is a file that's created atomically. A lock left behind by an agent that crashed or was killed is
   ignored, and if an agent is interrupted, its command is stopped and the keyboard let go.
 
@@ -199,6 +218,17 @@ swift test                       # the turn-taking rules and shared state
 scripts/build-app.sh             # → build/Hands Off.app
 scripts/readme-media/record.sh   # re-records docs/menubar.gif and docs/menu.png
 ```
+
+To try a build without touching the installed app, give a copy its own bundle identifier (its `Info.plist`) and its own
+state folder, and run its executable directly:
+
+```sh
+HANDSOFF_STATE_DIR=/tmp/ho-test HANDSOFF_VIRTUAL_DISPLAY=off HANDSOFF_PROMPT_AT="100 800" \
+  "/tmp/Hands Off Test.app/Contents/MacOS/HandsOff" &          # the menu bar app: no second virtual display
+HANDSOFF_STATE_DIR=/tmp/ho-test "/tmp/Hands Off Test.app/Contents/MacOS/HandsOff" focus -- sleep 2
+```
+
+`HANDSOFF_PROMPT_AT` puts the prompt's top left corner somewhere else (AppKit coordinates), e.g. on the virtual display.
 
 ## Support
 
