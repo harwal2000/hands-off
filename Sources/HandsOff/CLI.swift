@@ -7,9 +7,10 @@ enum CLI {
 
     Usage:
       handsoff focus [options] -- <command> [args…]
-          Waits until you're not typing (and nobody else has the keyboard), shows "Hands off" in the
-          menu bar, runs the command, then lets go. Wrap anything that takes keyboard focus or
-          posts key events. Several steps: handsoff focus -- sh -c '…'
+          Waits until you're not typing (and nobody else has the keyboard), asks you from the menu bar
+          (it starts by itself after 10 s; Not now makes agents wait 2 minutes, then asks again), shows
+          "Hands off" in the menu bar, runs the command, then lets go. Wrap anything that takes keyboard
+          focus or posts key events. Several steps: handsoff focus -- sh -c '…'
           --reason <text>   what it's doing, shown in the menu bar (default: the command)
           --seconds <n>     how long it expects to need, for the countdown
           --idle <n>        seconds without a key press or click before taking over (default 5)
@@ -26,7 +27,9 @@ enum CLI {
       handsoff screenshot <file.png>
           Captures the virtual display only, never your screens (needs Screen Recording for the terminal).
 
-      handsoff status          What the menu bar shows.
+      handsoff status          What the menu bar shows (including a prompt that's waiting for an answer).
+      handsoff config confirm on|off
+          Whether to ask before each hold (on by default; also in the menu: "Ask before each hold").
       handsoff hold [minutes]  Make agents wait (default 15 minutes), like the menu's "Hold on, I'm typing".
       handsoff resume          End the hold.
       handsoff quit-app        Quit the menu bar app (turns the virtual display off).
@@ -40,6 +43,7 @@ enum CLI {
         case "screenshot": return screenshot(rest)
         case "status": return status()
         case "hold": return hold(rest)
+        case "config": return config(rest)
         case "resume": StateStore.standard().endHold(); print("Agents can take the keyboard again."); return 0
         case "quit-app": return quitApp()
         case "_open-menu":   // undocumented: for README screenshots (wrap it in handsoff focus: a menu takes the keyboard)
@@ -87,19 +91,26 @@ enum CLI {
             return Child.run(command, holder: outer)
         }
 
-        AppBundle.launch()
+        if AppBundle.launch(), store.settings().confirm {
+            // A menu bar app that's only just starting can't ask yet: give it a moment rather than skip the prompt.
+            for _ in 0..<15 where !store.appIsRunning() { Thread.sleep(forTimeInterval: 0.2) }
+        }
         let holder = Holder(reason: reason ?? command.joined(separator: " "), label: label ?? defaultLabel(),
                             pid: me, started: Date(), seconds: seconds)
         Cleanup.install(store: store, pid: me)
 
-        let environment = FocusEnvironment(now: Date.init, sleep: { Thread.sleep(forTimeInterval: $0) }, secondsSinceInput: secondsSinceUserInput)
+        let environment = FocusEnvironment(now: Date.init, sleep: { Thread.sleep(forTimeInterval: $0) },
+                                           secondsSinceInput: secondsSinceUserInput, canAsk: store.appIsRunning)
         let outcome: WaitOutcome
         do {
             outcome = try waitForTurn(store: store, holder: holder, idle: idle, maxWait: maxWait, environment: environment) { reason in
                 switch reason {
                 case .userHold(let until): note("waiting: the user asked agents to hold on until \(until.formatted(date: .omitted, time: .shortened))")
+                case .notNow(let until): note("waiting: the user said Not now; asking again at \(until.formatted(date: .omitted, time: .standard))")
                 case .anotherAgent(let label): note("waiting: \(label) has the keyboard")
+                case .anotherPrompt(let label): note("waiting: the user is being asked about \(label)'s turn")
                 case .userActive: note("waiting: the user is typing or clicking (takes over after \(Int(idle)) s without)")
+                case .asking: note("asking the user first: starts in 10 s unless they say Not now (keys and clicks restart the countdown)")
                 }
             }
         } catch {
@@ -201,8 +212,17 @@ enum CLI {
         switch Status.read(from: store, now: now) {
         case .idle: print("No agent needs the keyboard.")
         case .waiting(let ws): print("Waiting for the keyboard:"); ws.forEach { print("  \($0.label): \($0.reason)") }
-        case .onHold(let until, let ws):
-            print("Agents are on hold until \(until.formatted(date: .omitted, time: .shortened)).")
+        case .onHold(let until, let notNow, let ws):
+            if notNow {
+                print("The user said Not now. Agents wait until \(until.formatted(date: .omitted, time: .standard)), then the next one asks again.")
+            } else {
+                print("Agents are on hold until \(until.formatted(date: .omitted, time: .shortened)).")
+            }
+            ws.forEach { print("  waiting: \($0.label): \($0.reason)") }
+        case .asking(let p, let ws):
+            let expected = p.seconds.map { ", about \(Int($0)) s" } ?? ""
+            let left = max(0, Int(p.startsAt.timeIntervalSince(now).rounded(.up)))
+            print("Asking the user: \(p.label) wants the keyboard (\(p.reason)\(expected)). Starts in \(left) s unless they say Not now.")
             ws.forEach { print("  waiting: \($0.label): \($0.reason)") }
         case .holding(let h, let ws, _):
             let elapsed = Int(now.timeIntervalSince(h.started))
@@ -210,6 +230,7 @@ enum CLI {
             print("Hands off: \(h.label) has the keyboard (\(h.reason)), \(elapsed) s so far\(expected). Menu bar: \(Status.read(from: store, now: now).menuBarTitle(now: now))")
             ws.forEach { print("  waiting: \($0.label): \($0.reason)") }
         }
+        print("Asks before each hold: \(store.settings().confirm ? "on" : "off") (handsoff config confirm on|off)")
         if let d = store.display() {
             print("Virtual display \(d.id): \(Int(d.appKit.width))×\(Int(d.appKit.height)) @\(Int(d.scale))x at AppKit (\(Int(d.appKit.x)), \(Int(d.appKit.y)))")
         } else {
@@ -224,6 +245,21 @@ enum CLI {
         do { try StateStore.standard().hold(until: until) } catch { return fail(error.localizedDescription) }
         print("Agents will wait until \(until.formatted(date: .omitted, time: .shortened)) (handsoff resume to end it).")
         return 0
+    }
+
+    static func config(_ args: [String]) -> Int32 {
+        let store = StateStore.standard()
+        switch (args.first, args.dropFirst().first) {
+        case (nil, _), ("confirm", nil):
+            print("confirm \(store.settings().confirm ? "on" : "off")   (ask before each hold)")
+            return 0
+        case ("confirm", let value?) where ["on", "off"].contains(value):
+            do { try store.setConfirm(value == "on") } catch { return fail(error.localizedDescription) }
+            print(value == "on" ? "Hands Off asks before each hold." : "Hands Off no longer asks before each hold.")
+            return 0
+        default:
+            return fail("config: use handsoff config confirm on|off", code: 2)
+        }
     }
 }
 

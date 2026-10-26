@@ -1,7 +1,9 @@
 import AppKit
 
 enum AppBundle {
-    static let identifier = "com.harwal2000.handsoff"
+    /// This build's identifier, so a second copy built for testing (another identifier) never quits or launches the
+    /// installed app.
+    static let identifier = Bundle.main.bundleIdentifier ?? "com.harwal2000.handsoff"
 
     /// The installed (or this) `Hands Off.app`, if there is one.
     static var url: URL? {

@@ -36,6 +36,7 @@ enum Cleanup {
             source.setEventHandler {
                 Child.stop()
                 store.release(pid: pid)
+                store.endPrompt(pid: pid)
                 store.removeWaiter(pid: pid)
                 exit(128 + sig)
             }
