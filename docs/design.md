@@ -50,7 +50,11 @@ They share state through files in `~/Library/Application Support/Hands Off/`
 | `display.json` | app | the virtual display's ID and frame (CoreGraphics and AppKit coordinates) |
 | `keyboard.lock` | CLI | the agent holding the keyboard: reason, label, pid, start |
 | `waiting/<pid>.json` | CLI | agents queued for the keyboard |
-| `hold.json` | app or CLI | you said "hold on"; holds the time it ends |
+| `hold.json` | app or CLI | you said "hold on" (or Not now); holds the time it ends |
+| `prompt.json` | CLI | the agent the menu bar is asking about, and when its countdown ends (one at a time, a lock like `keyboard.lock`) |
+| `start-<pid>` | app | you clicked Start on that agent's prompt |
+| `settings.json` | app or CLI | `confirm`: ask before each hold (on unless turned off) |
+| `app.json` | app | the menu bar app's pid, so the CLI only asks while something can show the prompt |
 
 The app polls the folder twice a second; the CLI needs no app to work (but launches it if installed, so
 the menu bar shows what's happening).
@@ -68,10 +72,16 @@ point, so the pointer doesn't drift onto it). Menu: turn it off and on.
 2. Waits until you're not holding agents, nobody else holds the keyboard, and you haven't pressed a key
    or clicked for `S` seconds (default 5). Mouse *movement* doesn't count; it doesn't move focus. Only
    real hardware input counts (`CGEventSource` HID state), so the agent's own synthetic events don't.
-3. Takes the lock (a hard link to a fully written file, so it appears atomically with its contents). Menu bar: red,
+3. Asks, unless you turned it off (menu, or `handsoff config confirm off`) or the app isn't running: takes the
+   prompt lock and the menu bar shows a non-activating panel (who, why, the estimate, a 10 s countdown, **Start** and
+   **Not now**, and how many others wait). **Start** goes now; the countdown ending goes too. A key press or click
+   *restarts* the countdown, rather than pausing it, so a hold never starts within 10 s of your last input, however
+   long you typed. **Not now** is a 2-minute hold: everyone waits, then an agent asks again; the command never fails
+   because of it (only `W` ends the wait).
+4. Takes the lock (a hard link to a fully written file, so it appears atomically with its contents). Menu bar: red,
    "Hands off" with a countdown (`--seconds`; `+m:ss` once it runs over) or the elapsed time.
-4. Runs the command, then releases. A holder whose process died is ignored.
-5. Exit code is the command's, except **75** when you pressed a key or clicked during the hold ("results may
+5. Runs the command, then releases. A holder whose process died is ignored.
+6. Exit code is the command's, except **75** when you pressed a key or clicked during the hold ("results may
    be wrong, run it again") or when waiting gave up after `W` seconds (default 30 min).
 
 Multi-step work goes in one wrapped shell: `handsoff focus -- sh -c '…'`.
@@ -85,6 +95,8 @@ Multi-step work goes in one wrapped shell: `handsoff focus -- sh -c '…'`.
 
 ## Builder's calls (not decided with the user)
 
+- Asking before each hold (the user's call); restarting the countdown on input, Not now = 2 minutes on hold, and
+  one prompt at a time (builder's calls).
 - The name, the 5 s idle default, exit code 75 (`EX_TEMPFAIL`), the amber/red colours.
 - Swift package, AppKit `NSStatusItem` (coloured text), Swift Testing, macOS 14+.
 - Shared via its git repo: clone, `scripts/install.sh` (builds, ad-hoc signs, copies to `~/Applications`,
