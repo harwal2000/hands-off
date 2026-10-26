@@ -104,6 +104,7 @@ public struct StateStore: Sendable {
 
     /// The user clicked Start on this agent's prompt.
     public func answerStart(pid: Int32) {
+        guard (read(promptFile) as Prompt?)?.pid == pid else { return }   // too late: it has started or gone
         try? ensureDirectory()
         FileManager.default.createFile(atPath: startFile(pid: pid).path, contents: nil)
     }

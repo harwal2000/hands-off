@@ -184,12 +184,27 @@ import Testing
         guard case .holding = Status.read(from: store, now: t0) else { Issue.record("not holding"); return }
     }
 
-    @Test func startAnswersOnlyTheAgentItWasFor() {
-        let (store, _) = makeStore()
+    @Test func startAnswersOnlyTheAgentItWasFor() throws {
+        let (store, _) = makeStore(alive: [20])
+        store.answerStart(pid: 20)
+        #expect(!store.takeStart(pid: 20))   // no prompt showing: too late, nothing to answer
+        #expect(try store.tryAsk(prompt(20)))
+        store.answerStart(pid: 10)
         store.answerStart(pid: 20)
         #expect(!store.takeStart(pid: 10))
         #expect(store.takeStart(pid: 20))
         #expect(!store.takeStart(pid: 20))   // used up
+    }
+
+    @Test func aStartLeftOverFromAnEarlierProcessDoesntSkipThePrompt() throws {
+        let (store, _) = makeStore(alive: [me])
+        // Clicked just as an earlier process with the same pid was finishing.
+        try FileManager.default.createDirectory(at: store.directory, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: store.startFile(pid: me).path, contents: nil)
+        let clock = FakeClock(canAsk: true)
+        let outcome = try waitForTurn(store: store, holder: holder(me), idle: 5, maxWait: 600, environment: clock.environment)
+        #expect(outcome == .acquired)
+        #expect(elapsed(clock) >= 10)
     }
 
     @Test func knowsWhetherTheMenuBarAppIsRunning() throws {

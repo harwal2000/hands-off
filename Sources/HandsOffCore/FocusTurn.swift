@@ -41,6 +41,7 @@ public func waitForTurn(store: StateStore, holder: Holder, idle: Double, maxWait
                         onWait: (WaitReason) -> Void = { _ in }) throws -> WaitOutcome {
     let start = env.now()
     try store.addWaiter(Waiter(reason: holder.reason, label: holder.label, pid: holder.pid, since: start))
+    _ = store.takeStart(pid: holder.pid)   // a click meant for an earlier process with this pid
     var prompt: Prompt?   // ours, while the user is being asked
     func dropPrompt() {
         guard prompt != nil else { return }
