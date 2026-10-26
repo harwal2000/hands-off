@@ -17,17 +17,24 @@ final class LiveSet: @unchecked Sendable {
 }
 
 /// Time that moves only when the code under test sleeps. `lastInput` is when the user last pressed a key or clicked.
+/// `canAsk` is whether the menu bar app is there to show the prompt (off by default, so tests about waiting aren't
+/// about the prompt too).
 final class FakeClock: @unchecked Sendable {
     var now = Date(timeIntervalSince1970: 1_000_000)
     var lastInput: Date
+    var canAsk: Bool
     var onSleep: (FakeClock) -> Void = { _ in }
-    init(secondsSinceInput: Double = 3600) { lastInput = now.addingTimeInterval(-secondsSinceInput) }
+    init(secondsSinceInput: Double = 3600, canAsk: Bool = false) {
+        lastInput = now.addingTimeInterval(-secondsSinceInput)
+        self.canAsk = canAsk
+    }
 
     var environment: FocusEnvironment {
         FocusEnvironment(
             now: { self.now },
             sleep: { self.now = self.now.addingTimeInterval($0); self.onSleep(self) },
-            secondsSinceInput: { self.now.timeIntervalSince(self.lastInput) }
+            secondsSinceInput: { self.now.timeIntervalSince(self.lastInput) },
+            canAsk: { self.canAsk }
         )
     }
 }
