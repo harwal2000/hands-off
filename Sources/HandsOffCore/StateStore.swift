@@ -1,12 +1,13 @@
 import Foundation
 
 /// The files the menu bar app and the command-line tool share. Every write is atomic; anything left behind by a
-/// process that has died is ignored.
+/// process that has died is ignored, including when its PID has since gone to another process (after a restart).
 public struct StateStore: Sendable {
     public let directory: URL
-    let isAlive: @Sendable (Int32) -> Bool
+    /// Whether the process with this PID that wrote a file at this time is still running.
+    let isAlive: @Sendable (_ pid: Int32, _ wroteAt: Date) -> Bool
 
-    public init(directory: URL, isAlive: @escaping @Sendable (Int32) -> Bool = processIsAlive) {
+    public init(directory: URL, isAlive: @escaping @Sendable (_ pid: Int32, _ wroteAt: Date) -> Bool = processIsAlive) {
         self.directory = directory
         self.isAlive = isAlive
     }
@@ -33,7 +34,7 @@ public struct StateStore: Sendable {
 
     /// The live holder, if any.
     public func holder() -> Holder? {
-        guard let h: Holder = read(lockFile), isAlive(h.pid) else { return nil }
+        guard let h: Holder = read(lockFile), owns(h.pid, lockFile) else { return nil }
         return h
     }
 
@@ -61,11 +62,11 @@ public struct StateStore: Sendable {
     /// Removes a lock left by a dead process. Moves it aside first, so two agents clearing the same stale lock
     /// can't delete a fresh one; puts back anything that turns out to be alive.
     private func removeStale(_ file: URL) -> Bool {
-        guard let current: Owner = read(file), !isAlive(current.pid) else { return false }
+        guard let current: Owner = read(file), !owns(current.pid, file) else { return false }
         let aside = directory.appending(path: ".stale-\(getpid())-\(UUID().uuidString)")
         guard rename(file.path, aside.path) == 0 else { return true }   // someone else moved it: try again
         defer { unlink(aside.path) }
-        if let moved: Owner = read(aside), isAlive(moved.pid) {
+        if let moved: Owner = read(aside), owns(moved.pid, aside) {
             _ = link(aside.path, file.path)
             return false
         }
@@ -81,7 +82,7 @@ public struct StateStore: Sendable {
 
     /// The live prompt, if an agent is asking.
     public func asking() -> Prompt? {
-        guard let p: Prompt = read(promptFile), isAlive(p.pid) else { return nil }
+        guard let p: Prompt = read(promptFile), owns(p.pid, promptFile) else { return nil }
         return p
     }
 
@@ -145,7 +146,7 @@ public struct StateStore: Sendable {
 
     public func appIsRunning() -> Bool {
         guard let a: App = read(appFile) else { return false }
-        return isAlive(a.pid)
+        return owns(a.pid, appFile)
     }
 
     // MARK: Queue
@@ -162,8 +163,10 @@ public struct StateStore: Sendable {
     /// Live waiters, oldest first.
     public func waiters() -> [Waiter] {
         let files = (try? FileManager.default.contentsOfDirectory(at: waitingDirectory, includingPropertiesForKeys: nil)) ?? []
-        return files.compactMap { (url: URL) -> Waiter? in read(url) }
-            .filter { isAlive($0.pid) }
+        return files.compactMap { (url: URL) -> Waiter? in
+            guard let w: Waiter = read(url), owns(w.pid, url) else { return nil }
+            return w
+        }
             .sorted { $0.since < $1.since }
     }
 
@@ -202,7 +205,7 @@ public struct StateStore: Sendable {
     }
 
     public func display() -> DisplayInfo? {
-        guard let d: DisplayInfo = read(displayFile), isAlive(d.pid) else { return nil }
+        guard let d: DisplayInfo = read(displayFile), owns(d.pid, displayFile) else { return nil }
         return d
     }
 
@@ -210,6 +213,13 @@ public struct StateStore: Sendable {
 
     private func ensureDirectory() throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    /// Whether `pid` is the live process that wrote `file`, judged by the file's modification time. Every file here is
+    /// written by the process it names (or, in the hard-linked locks, by one it made), so it can't predate that process.
+    private func owns(_ pid: Int32, _ file: URL) -> Bool {
+        let written = (try? FileManager.default.attributesOfItem(atPath: file.path))?[.modificationDate] as? Date
+        return isAlive(pid, written ?? .distantFuture)   // gone since it was read: judge by the PID alone
     }
 
     private func read<T: Decodable>(_ url: URL) -> T? {
@@ -221,9 +231,23 @@ public struct StateStore: Sendable {
 /// How long Not now makes agents wait before asking again.
 public let notNowSeconds: Double = 120
 
-/// True while a process with this ID exists (EPERM: it exists but belongs to someone else).
-public func processIsAlive(_ pid: Int32) -> Bool {
-    pid > 0 && (kill(pid, 0) == 0 || errno == EPERM)
+/// True while the process with this ID that wrote a file at `wroteAt` still runs: a process with this ID exists (EPERM:
+/// it belongs to someone else) and it started before the file was written. A process that started later only reuses
+/// the ID, as low IDs are handed out again after a restart. A couple of seconds' slack covers clock adjustments.
+public func processIsAlive(_ pid: Int32, wroteAt: Date) -> Bool {
+    guard pid > 0, kill(pid, 0) == 0 || errno == EPERM else { return false }
+    guard let started = processStartTime(pid) else { return true }
+    return started <= wroteAt.addingTimeInterval(2)
+}
+
+/// When the process with this ID started, from the kernel's process table.
+func processStartTime(_ pid: Int32) -> Date? {
+    var info = kinfo_proc()
+    var size = MemoryLayout<kinfo_proc>.stride
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+    guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+    let t = info.kp_proc.p_un.__p_starttime
+    return Date(timeIntervalSince1970: Double(t.tv_sec) + Double(t.tv_usec) / 1_000_000)
 }
 
 extension JSONEncoder {

@@ -10,11 +10,20 @@ swiftc -O scripts/readme-media/menuwin.swift -o $OUT/menuwin
 STATE="$HOME/Library/Application Support/Hands Off"; ITEM="$STATE/menubar-item.txt"; mkdir -p "$STATE/waiting"
 REGION_X=600   # capture from here to the right edge of the main display; the item is cropped out of it per frame
 
+# Fake waiting agents are removed however the script ends: a file left in the real queue shows up as a stuck request
+# once its PID goes to another process (as after a restart).
 fake_waiter() {   # label reason → pid of a process standing in for a waiting agent
-  sleep 120 & local pid=$!
+  sleep 120 >/dev/null & local pid=$!   # not on $(…)'s stdout, or the caller waits until it exits
+  echo $pid >> $OUT/fakes
   printf '{"label":"%s","pid":%s,"reason":"%s","since":"2026-01-01T00:00:00Z"}' "$1" $pid "$2" > "$STATE/waiting/$pid.json"
   echo $pid
 }
+remove_fakes() {
+  [[ -f $OUT/fakes ]] || return 0
+  while read -r pid; do kill $pid 2>/dev/null; rm -f "$STATE/waiting/$pid.json"; done < $OUT/fakes
+}
+trap remove_fakes EXIT
+trap 'exit 130' INT TERM
 
 # 1. Menu bar GIF: idle → an agent waits → it has the keyboard (countdown) → idle → "hold on" → idle.
 handsoff focus --idle 0 --allow-input --reason warm-up -- true 2>/dev/null   # makes the app record its item position
@@ -45,5 +54,5 @@ P=$(fake_waiter "my-app · settings-fix" "Screenshot of the Settings window")
 until handsoff focus --label "my-app · editor-fix" --reason "Typing test in the editor" --seconds 40 -- sh -c "
   sleep 4; handsoff _open-menu 3; sleep 1.2
   screencapture -x -l \$($OUT/menuwin 'Hands Off') docs/menu.png; sleep 2.5"; do echo "interrupted, again"; done
-kill $P; rm -f "$STATE/waiting/$P.json"
+remove_fakes
 echo "docs/menubar.gif, docs/menu.png"
