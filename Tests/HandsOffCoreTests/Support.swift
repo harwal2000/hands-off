@@ -5,7 +5,7 @@ import Foundation
 func makeStore(alive: Set<Int32> = []) -> (StateStore, LiveSet) {
     let dir = FileManager.default.temporaryDirectory.appending(path: "handsoff-tests-\(UUID().uuidString)")
     let live = LiveSet(alive)
-    return (StateStore(directory: dir, isAlive: { live.contains($0) }), live)
+    return (StateStore(directory: dir, isAlive: { pid, _ in live.contains(pid) }), live)
 }
 
 final class LiveSet: @unchecked Sendable {
