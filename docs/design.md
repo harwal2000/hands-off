@@ -29,7 +29,7 @@ Built to be shared: nothing in it knows about any particular app or agent.
 - Isolating focus completely (that needs a VM; macOS has one keyboard focus per login session).
 - Driving the app under test. Each app (or agent) puts its own windows on the virtual display, using
   the frame `handsoff display` prints.
-- Viewing the virtual display's contents (a "peek" window needs Screen Recording; later, maybe).
+- Driving the virtual display yourself. You can watch it (see [[#Planned: seeing what's on the virtual display|Planned]]), not use it.
 
 ## Anti-goals
 
@@ -92,6 +92,33 @@ Multi-step work goes in one wrapped shell: `handsoff focus -- sh -c '…'`.
 - `handsoff screenshot <file.png>` — captures only the virtual display, never your screens.
 - `handsoff status` — what the menu bar shows, as text.
 - `handsoff hold [minutes]` / `handsoff resume` — same as the menu's buttons.
+
+## Planned: seeing what's on the virtual display
+
+Noted 10 November 2026, not built yet.
+
+**The problem.** Apps sometimes open their windows on the virtual display when no agent is using it.
+You can't see that display, so the app looks broken: you click its icon and nothing appears. Today the
+fix is Raycast's "Move to Next Display", but only once you've guessed that's where the window went.
+(Likely cause, not checked: macOS reopens a window on the display it was last on, and an agent's test
+run left it there.)
+
+**1. Peek window (picture in picture).** A small floating window on the main display that shows the
+virtual display live, so you can spot a stray window at a glance and see what an agent is doing during a hold.
+
+- ScreenCaptureKit stream filtered to the virtual display's ID; about 10 fps at thumbnail size, which is plenty.
+- Non-activating panel that ignores clicks, so it never takes focus. A click during a hold counts as input
+  and fails the agent's step with exit 75. Move or resize it only when no hold is running.
+- Menu toggle: show always, or only during a hold.
+- Hands Off.app itself needs Screen Recording (today only the terminal has it, for `handsoff screenshot`),
+  and macOS shows its purple recording dot while the window is open.
+
+**2. Stray window alert (maybe the better fix for this problem).** When no agent holds or waits for the
+keyboard, check which windows sit on the virtual display (`CGWindowListCopyWindowInfo`: window bounds and
+owner app, no Screen Recording needed). If any are there, say so in the menu bar ("Notes is on the
+virtual display") with a **Bring it here** action that moves the window to the main display. Moving
+another app's window needs Accessibility permission (`AXUIElement` position). An agent's test windows
+are expected there, so only alert when nobody's been using the display for a while.
 
 ## Builder's calls (not decided with the user)
 
